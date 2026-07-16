@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="13" time="9.729" timestamp="2026-07-16T08:14:11.243262+00:00" hostname="agent-env-2cd83df9-dc71-415e-9852-8b47e095fdac"><testcase classname="backend.tests.test_recurring.TestRecurringCRUD" name="test_create_future_rule_no_autopost" time="1.759" /><testcase classname="backend.tests.test_recurring.TestRecurringCRUD" name="test_list_recurring" time="0.261" /><testcase classname="backend.tests.test_recurring.TestRecurringCRUD" name="test_update_and_delete_rule" time="0.900" /><testcase classname="backend.tests.test_recurring.TestRecurringCRUD" name="test_delete_nonexistent_returns_404" time="0.168" /><testcase classname="backend.tests.test_recurring.TestRecurringCRUD" name="test_requires_auth" time="0.138" /><testcase classname="backend.tests.test_recurring.TestAutoPost" name="test_past_monthly_catchup" time="0.401"><failure message="assert 0 == 4&#10; +  where 0 = len([])">backend/tests/test_recurring.py:161: in test_past_monthly_catchup
+    assert len(linked) == rule["posted_count"]
+E   assert 0 == 4
+E    +  where 0 = len([])</failure></testcase><testcase classname="backend.tests.test_recurring.TestAutoPost" name="test_weekly_income_catchup" time="0.319"><failure message="assert 0 == 4&#10; +  where 0 = len([])">backend/tests/test_recurring.py:200: in test_weekly_income_catchup
+    assert len(linked) == rule["posted_count"]
+E   assert 0 == 4
+E    +  where 0 = len([])</failure></testcase><testcase classname="backend.tests.test_recurring.TestAutoPost" name="test_startup_catchup" time="0.355"><failure message="assert 0 == 2&#10; +  where 0 = len([])">backend/tests/test_recurring.py:234: in test_startup_catchup
+    assert len(linked) == rule["posted_count"]
+E   assert 0 == 2
+E    +  where 0 = len([])</failure></testcase><testcase classname="backend.tests.test_recurring.TestAutoPost" name="test_process_endpoint_returns_posted_count" time="0.630" /><testcase classname="backend.tests.test_recurring.TestLazyAutoPost" name="test_lazy_on_expenses_get" time="0.683"><failure message="AssertionError: Expected lazy auto-post on GET /expenses&#10;assert 0 &gt;= 1&#10; +  where 0 = len([])">backend/tests/test_recurring.py:292: in test_lazy_on_expenses_get
+    assert len(linked) &gt;= 1, "Expected lazy auto-post on GET /expenses"
+E   AssertionError: Expected lazy auto-post on GET /expenses
+E   assert 0 &gt;= 1
+E    +  where 0 = len([])</failure></testcase><testcase classname="backend.tests.test_recurring.TestLazyAutoPost" name="test_lazy_on_summary" time="0.985" /><testcase classname="backend.tests.test_recurring.TestUserScoping" name="test_rules_are_user_scoped" time="1.448" /><testcase classname="backend.tests.test_recurring.TestDeactivation" name="test_deactivate_stops_future_posting" time="0.794" /></testsuite></testsuites>

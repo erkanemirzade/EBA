@@ -141,6 +141,28 @@ class Investment(InvestmentIn):
     created_at: str
 
 
+# ----------- Recurring rule models -----------
+RecurringKind = Literal["income", "expense", "startup"]
+RecurringFrequency = Literal["weekly", "monthly", "yearly"]
+
+
+class RecurringIn(BaseModel):
+    name: str
+    kind: RecurringKind
+    frequency: RecurringFrequency
+    next_run: str  # ISO date YYYY-MM-DD when the NEXT posting should happen
+    active: bool = True
+    template: dict  # payload matching IncomeIn / ExpenseIn / StartupCostIn
+
+
+class Recurring(RecurringIn):
+    id: str
+    user_id: str
+    created_at: str
+    last_posted: Optional[str] = None
+    posted_count: int = 0
+
+
 # ----------- Auth helpers -----------
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -178,6 +200,77 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ----------- Recurring auto-post helpers -----------
+def _advance_date(iso_date: str, frequency: str) -> str:
+    d = datetime.strptime(iso_date, "%Y-%m-%d").date()
+    if frequency == "weekly":
+        d = d + timedelta(days=7)
+    elif frequency == "monthly":
+        # add one calendar month, clamping day if needed
+        year = d.year + (1 if d.month == 12 else 0)
+        month = 1 if d.month == 12 else d.month + 1
+        day = d.day
+        # find last valid day of new month
+        for candidate in (day, 30, 29, 28):
+            try:
+                d = d.replace(year=year, month=month, day=min(day, candidate))
+                break
+            except ValueError:
+                continue
+    elif frequency == "yearly":
+        try:
+            d = d.replace(year=d.year + 1)
+        except ValueError:
+            # Feb 29 → Feb 28 next year
+            d = d.replace(year=d.year + 1, day=28)
+    return d.isoformat()
+
+
+async def _process_due_recurring(user_id: str) -> int:
+    """Post any due recurring rules for the user. Returns number of records posted."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    posted = 0
+    rules = await db.recurring.find(
+        {"user_id": user_id, "active": True, "next_run": {"$lte": today}},
+        {"_id": 0},
+    ).to_list(500)
+    for rule in rules:
+        next_run = rule["next_run"]
+        last_posted = rule.get("last_posted")
+        posted_count = rule.get("posted_count", 0)
+        # Safety cap: never post more than 60 catch-ups in a single call
+        catch_up = 0
+        while next_run <= today and catch_up < 60:
+            record = {
+                **rule["template"],
+                "date": next_run,
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "created_at": _iso_now(),
+                "recurring_id": rule["id"],
+            }
+            kind = rule["kind"]
+            if kind == "income":
+                # ensure status present
+                record.setdefault("status", "paid")
+                await db.income.insert_one(record)
+            elif kind == "expense":
+                await db.expenses.insert_one(record)
+            elif kind == "startup":
+                await db.startup_costs.insert_one(record)
+            last_posted = next_run
+            posted += 1
+            catch_up += 1
+            posted_count += 1
+            next_run = _advance_date(next_run, rule["frequency"])
+        if catch_up > 0:
+            await db.recurring.update_one(
+                {"id": rule["id"]},
+                {"$set": {"next_run": next_run, "last_posted": last_posted, "posted_count": posted_count}},
+            )
+    return posted
 
 
 # ----------- Auth routes -----------
@@ -286,6 +379,7 @@ async def list_income(
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"client_name": rx}, {"service_description": rx}, {"invoice_number": rx}]
+    await _process_due_recurring(current["id"])
     return await db.income.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
 
 
@@ -321,6 +415,7 @@ async def list_expenses(
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"vendor": rx}, {"description": rx}]
+    await _process_due_recurring(current["id"])
     return await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
 
 
@@ -342,6 +437,7 @@ async def delete_expense(item_id: str, current=Depends(get_current_user)):
 # ----------- Startup costs routes -----------
 @api_router.get("/startup-costs", response_model=List[StartupCost])
 async def list_startup(current=Depends(get_current_user)):
+    await _process_due_recurring(current["id"])
     return await _list(db.startup_costs, current["id"])
 
 
@@ -376,6 +472,58 @@ async def delete_investment(item_id: str, current=Depends(get_current_user)):
     return await _delete(db.investments, current["id"], item_id)
 
 
+# ----------- Recurring routes -----------
+@api_router.get("/recurring", response_model=List[Recurring])
+async def list_recurring(current=Depends(get_current_user)):
+    await _process_due_recurring(current["id"])
+    return await db.recurring.find({"user_id": current["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/recurring", response_model=Recurring)
+async def create_recurring(payload: RecurringIn, current=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "created_at": _iso_now(),
+        "last_posted": None,
+        "posted_count": 0,
+        **payload.dict(),
+    }
+    await db.recurring.insert_one(doc)
+    doc.pop("_id", None)
+    # Post immediately if next_run is today or in the past
+    await _process_due_recurring(current["id"])
+    fresh = await db.recurring.find_one({"id": doc["id"]}, {"_id": 0})
+    return fresh
+
+
+@api_router.put("/recurring/{item_id}", response_model=Recurring)
+async def update_recurring(item_id: str, payload: RecurringIn, current=Depends(get_current_user)):
+    res = await db.recurring.find_one_and_update(
+        {"id": item_id, "user_id": current["id"]},
+        {"$set": payload.dict()},
+        return_document=True,
+        projection={"_id": 0},
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return res
+
+
+@api_router.delete("/recurring/{item_id}")
+async def delete_recurring(item_id: str, current=Depends(get_current_user)):
+    res = await db.recurring.delete_one({"id": item_id, "user_id": current["id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"ok": True}
+
+
+@api_router.post("/recurring/process")
+async def process_recurring_now(current=Depends(get_current_user)):
+    posted = await _process_due_recurring(current["id"])
+    return {"posted": posted}
+
+
 # ----------- Summary / Reports -----------
 def _sum_by_currency(rows: list, filter_fn=None) -> dict:
     totals = {"EUR": 0.0, "TRY": 0.0, "GBP": 0.0}
@@ -391,6 +539,7 @@ def _sum_by_currency(rows: list, filter_fn=None) -> dict:
 @api_router.get("/summary")
 async def summary(current=Depends(get_current_user)):
     uid = current["id"]
+    await _process_due_recurring(uid)
     income = await db.income.find({"user_id": uid}, {"_id": 0}).to_list(5000)
     expenses = await db.expenses.find({"user_id": uid}, {"_id": 0}).to_list(5000)
     startup = await db.startup_costs.find({"user_id": uid}, {"_id": 0}).to_list(5000)

@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 3 review — backend + Expo web. Recurring transactions module tested end-to-end. Backend pytest suite now 51/51 passing (35 regression from iter 1 + iter 2 + 13 new recurring tests + 3 existing). Verified: POST/GET/PUT/DELETE /api/recurring, immediate auto-post on creation when next_run<=today, past-date catch-up producing correct N postings across weekly/monthly frequencies for expense/income/startup kinds, next_run advances past today, lazy auto-post triggered by GET /summary, /income, /expenses, /startup-costs, POST /recurring/process returns {posted:N}, user-scoping (User A rules invisible to User B, cross-user delete returns 404), deactivation stops future posting. Frontend flow verified on 375x667 mobile viewport: sign-in with erkan@ebaconsulting.com → Settings tab → 'Recurring Transactions' → /recurring screen loads with seeded 'Notion Team' rule (9 posted). Create form (name, type/frequency/category chips, vendor, description, amount, currency, paid-by) posts a monthly expense; new rule appears in list with correct 'Expense • monthly • €20.00 / Next 2026-08-16 / 1 posted' metadata. Switch toggle, trash delete, and tap-to-edit (opens 'Edit Rule' with prefilled values) all work. ONE backend defect found: recurring_id is stored in Mongo but stripped from API responses because response_model (Income/Expense/StartupCost) doesn't include it — breaks the review-request contract 'records with recurring_id link'. Regression bug from iter 1 (sign-out no redirect) still applies but out of scope for iter 3.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/income, /api/expenses, /api/startup-costs",
+        "issue": "recurring_id field is written to MongoDB by _process_due_recurring (server.py L252) but stripped from responses because the Pydantic response_models Income/Expense/StartupCost (server.py L83-128) don't declare a recurring_id field. Add `recurring_id: Optional[str] = None` to Income, Expense and StartupCost models (and IncomeIn/ExpenseIn/StartupCostIn is not required — just the read-side models). Frontend/tests cannot distinguish auto-posted entries from manual ones today."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_recurring.py",
+    "/app/backend/tests/test_eba_finance.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add `recurring_id: Optional[str] = None` to Income, Expense and StartupCost Pydantic response models in /app/backend/server.py (~lines 83, 104, 125) so the recurring→record link is exposed by list APIs. This unblocks the frontend from visually marking auto-generated entries and satisfies the iter-3 acceptance criterion.",
+    "(Carried over from iter 1, still unresolved) Sign-out flow leaves user on /settings without redirect — add router.replace('/(auth)/sign-in') after signOut, or auth guard in (tabs)/_layout.tsx."
+  ],
+  "critical_code_review_comments": [
+    "server.py:206-228 _advance_date monthly logic is unusual: `for candidate in (day, 30, 29, 28)` then `day=min(day, candidate)` — the inner min is redundant. It works for common cases but the intent (clamp Jan 31 → Feb 28) could be more readable using calendar.monthrange. Not a blocker.",
+    "server.py:231-273 _process_due_recurring correctly caps at 60 catch-ups, sets recurring_id on the record, updates next_run/last_posted/posted_count atomically per rule — good.",
+    "server.py has grown to 813 lines — approaching the 700-line guideline for splitting. Consider extracting recurring/reports/export into separate router modules in the next iteration.",
+    "PUT /api/recurring/{id} does NOT trigger _process_due_recurring after activating a paused rule. Lazy processing still catches it via subsequent GETs but a direct auto-post-on-activate would be nicer UX. Not a bug — GET flow covers it.",
+    "recurring.tsx: keyboardType='decimal-pad' on amount is correct; testIDs present on every interactive element — good.",
+    "recurring.tsx L138 toggleActive doesn't await load() but load is async and updates state — minor, works fine."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_recurring.py (created — 13 tests, all pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (51/51 pytest, incl. 13 new recurring tests)",
+    "frontend": "100% for recurring flow (create/list/toggle/delete/tap-to-edit all verified on 375x667 viewport)"
+  },
+  "seed_data_creation": "Fresh module-scoped users TEST_reca_*, TEST_recb_* registered per test run; test rules and their auto-posted expense/income/startup records are cleaned up in-test. One 'TEST Notion Team' rule created via UI on erkan@ebaconsulting.com and deleted by the same test run. Existing seeded 'Notion Team' rule (9 postings) confirmed still present.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 51 backend tests pass. If the recurring_id response-model fix lands, update TestAutoPost tests in /app/backend/tests/test_recurring.py to filter linked records by recurring_id instead of vendor/description (search for the comment 'recurring_id NOT exposed'). Frontend: /recurring screen uses expected testIDs — recurring-toggle-form (+/x), recurring-name, recurring-vendor, recurring-description, recurring-amount, recurring-next-run, recurring-kind-*, recurring-freq-*, recurring-category-*, recurring-currency-*, recurring-paidby-*, recurring-save, recurring-row-{id}, recurring-toggle-{id}, recurring-delete-{id}, recurring-back, recurring-error. Tab bar nav uses <a href='...settings'> — use anchor click via JS if get_by_test_id doesn't resolve.",
+  "rca_of_issue": "recurring_id missing in API responses: The helper _process_due_recurring (server.py:246-253) inserts records with a 'recurring_id' field into db.income/expenses/startup_costs. However, list endpoints declare response_model=List[Income|Expense|StartupCost], and those Pydantic models (L83-86, L104-107, L125-128) only include the base *In fields + id/user_id/created_at. FastAPI/pydantic strips any extra keys from the response. Fix: add `recurring_id: Optional[str] = None` to each of the three read models. No migration needed — Mongo already stores the field."
+}

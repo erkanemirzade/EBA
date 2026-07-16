@@ -65,6 +65,17 @@ export default function SettingsScreen() {
         <Text style={[styles.section, { color: c.onSurfaceSecondary }]}>Data</Text>
         <View style={[styles.group, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
           <Pressable
+            testID="settings-recurring"
+            onPress={() => router.push('/recurring' as any)}
+            style={[styles.row, { borderBottomColor: c.divider }]}
+          >
+            <View style={styles.rowLeft}>
+              <Ionicons name="repeat-outline" size={20} color={c.onSurface} />
+              <Text style={{ color: c.onSurface, fontSize: 15 }}>Recurring Transactions</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={c.muted} />
+          </Pressable>
+          <Pressable
             testID="settings-investment"
             onPress={() => router.push('/investments' as any)}
             style={[styles.row, { borderBottomColor: c.divider }]}
