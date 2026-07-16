@@ -84,6 +84,7 @@ class Income(IncomeIn):
     id: str
     user_id: str
     created_at: str
+    recurring_id: Optional[str] = None
 
 
 class ExpenseIn(BaseModel):
@@ -105,6 +106,7 @@ class Expense(ExpenseIn):
     id: str
     user_id: str
     created_at: str
+    recurring_id: Optional[str] = None
 
 
 class StartupCostIn(BaseModel):
@@ -126,6 +128,7 @@ class StartupCost(StartupCostIn):
     id: str
     user_id: str
     created_at: str
+    recurring_id: Optional[str] = None
 
 
 class InvestmentIn(BaseModel):

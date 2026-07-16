@@ -29,8 +29,15 @@ Navy blue (`#003366`) accents on white background, iOS-native rhythm (8pt grid),
 - Added `.watchmanconfig` to ignore `.git/.expo/.metro-cache/android/ios`.
 - Set `JWT_SECRET` in `/app/backend/.env`.
 
+## Iteration 3 additions (Feb 2026)
+- **Recurring transactions with auto-post scheduler**: new `recurring` collection with template + frequency (`weekly` / `monthly` / `yearly`).
+- Endpoints: `POST /api/recurring`, `GET /api/recurring`, `PUT /api/recurring/{id}`, `DELETE /api/recurring/{id}`, `POST /api/recurring/process`.
+- **Lazy scheduler**: `_process_due_recurring(user_id)` is invoked on `GET /api/summary`, `/api/income`, `/api/expenses`, `/api/startup-costs`, `/api/recurring`, and immediately after `POST /api/recurring`. It catches up any missed cycles (safety cap 60 per pass), advances `next_run`, tracks `posted_count` and `last_posted`.
+- Every auto-posted record stores a `recurring_id` foreign key back to its rule (visible in list responses).
+- Frontend: new `/recurring` screen accessible from Settings → *Recurring Transactions*. Inline form supports Income / Expense / Startup rules; list shows kind/frequency/amount, next post date, posted count, and an active toggle switch. Tap-to-edit + delete supported.
+
 ## Future (deferred per spec)
-Invoice generation, VAT/tax reports, bank integration, OCR receipt scanning, client management, project profitability, recurring expenses, budgets.
+Invoice generation, VAT/tax reports, bank integration, OCR receipt scanning, client management, project profitability, budgets.
 
 ## Iteration 2 additions (Feb 2026)
 - **Edit-in-place**: tap any income/expense/startup row → form opens pre-filled → PUT to update. Save button reads `Update`.
