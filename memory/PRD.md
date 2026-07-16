@@ -36,6 +36,25 @@ Navy blue (`#003366`) accents on white background, iOS-native rhythm (8pt grid),
 - Every auto-posted record stores a `recurring_id` foreign key back to its rule (visible in list responses).
 - Frontend: new `/recurring` screen accessible from Settings → *Recurring Transactions*. Inline form supports Income / Expense / Startup rules; list shows kind/frequency/amount, next post date, posted count, and an active toggle switch. Tap-to-edit + delete supported.
 
+## Iteration 4 additions (Feb 2026) — Security hardening
+
+Security audit findings addressed. **74/74 backend tests passing** (23 new security tests + 51 prior).
+
+- **DoS protection**:
+  - `MAX_RECURRING_RULES_PER_USER = 50` — rejects further rules with 400.
+  - `MAX_CATCHUP_POSTS_PER_INVOCATION = 200` — global cap on records posted in a single `_process_due_recurring` call.
+- **Regex-injection guard**: `$regex` search terms in `/api/income?q=` and `/api/expenses?q=` are escaped with `re.escape()` and truncated to `MAX_SEARCH_LEN = 100` chars.
+- **Input validation**: Pydantic `Field(...)` `max_length` on every user string (`client_name`, `service_description`, `vendor`, `description`, `notes`, `invoice_number`, recurring `name`), and `gt=0, le=1_000_000_000` on every amount.
+- **Auth hardening**:
+  - `JWT_SECRET` required (no guessable fallback) — backend refuses to start otherwise.
+  - In-memory login throttle: 8 failures per email per 60s → 429; success resets.
+  - Registration returns a generic error on duplicate email to prevent enumeration.
+- **Export safety**:
+  - `/api/export/csv?kind=…` allowlisted (`all|income|expenses|startup|investments`); other values return 400.
+  - CSV cells starting with `= + - @` are prefixed with `'` to neutralize Excel/Sheets formula injection.
+  - PDF (`reportlab`) escapes any user-supplied name via `xml.sax.saxutils.escape` before templating.
+- **`.env`** patterns added to `/app/.gitignore`.
+
 ## Future (deferred per spec)
 Invoice generation, VAT/tax reports, bank integration, OCR receipt scanning, client management, project profitability, budgets.
 
