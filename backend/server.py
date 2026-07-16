@@ -30,9 +30,33 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "eba-finance-tracker-super-secret-key-change-me")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET is not set. Refuse to start with a guessable fallback. "
+        "Set a strong random JWT_SECRET in /app/backend/.env."
+    )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
+
+# Recurring safety limits
+MAX_RECURRING_RULES_PER_USER = 50
+MAX_CATCHUP_POSTS_PER_INVOCATION = 200
+
+# Search input limits
+MAX_SEARCH_LEN = 100
+import re as _re
+
+
+def _escape_regex(s: str) -> str:
+    return _re.escape(s)
+
+
+# Very small in-memory login throttle (per-email). MVP protection only —
+# does not survive restarts and is not cluster-safe, but blocks trivial brute-force.
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+LOGIN_WINDOW_SEC = 60
+LOGIN_MAX_ATTEMPTS = 8
 
 app = FastAPI(title="EBA Finance Tracker API", lifespan=None)  # lifespan set below
 api_router = APIRouter(prefix="/api")
@@ -48,13 +72,13 @@ Currency = Literal["EUR", "TRY", "GBP"]
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
-    name: Optional[str] = None
+    password: str = Field(..., min_length=6, max_length=128)
+    name: Optional[str] = Field(None, max_length=80)
 
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=128)
 
 
 class UserPublic(BaseModel):
@@ -70,14 +94,14 @@ class AuthResponse(BaseModel):
 
 
 class IncomeIn(BaseModel):
-    date: str  # ISO date YYYY-MM-DD
-    client_name: str
-    service_description: str
-    invoice_number: Optional[str] = None
-    amount: float
+    date: str = Field(..., min_length=10, max_length=10)
+    client_name: str = Field(..., min_length=1, max_length=120)
+    service_description: str = Field(..., min_length=1, max_length=500)
+    invoice_number: Optional[str] = Field(None, max_length=40)
+    amount: float = Field(..., gt=0, le=1_000_000_000)
     currency: Currency
     status: Literal["paid", "pending"] = "paid"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class Income(IncomeIn):
@@ -88,18 +112,18 @@ class Income(IncomeIn):
 
 
 class ExpenseIn(BaseModel):
-    date: str
+    date: str = Field(..., min_length=10, max_length=10)
     category: Literal[
         "Office", "Software", "Internet", "Marketing", "Travel",
         "Education", "Equipment", "Professional Services", "Other"
     ]
-    vendor: str
-    description: str
-    amount: float
+    vendor: str = Field(..., min_length=1, max_length=120)
+    description: str = Field(..., min_length=1, max_length=500)
+    amount: float = Field(..., gt=0, le=1_000_000_000)
     currency: Currency
-    payment_method: Optional[str] = None
+    payment_method: Optional[str] = Field(None, max_length=40)
     paid_by: Literal["Personal", "Company", "Bahar", "Other"] = "Company"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class Expense(ExpenseIn):
@@ -110,18 +134,18 @@ class Expense(ExpenseIn):
 
 
 class StartupCostIn(BaseModel):
-    date: str
+    date: str = Field(..., min_length=10, max_length=10)
     category: Literal[
         "Company Registration", "Lawyer", "Accountant", "Government Fees",
         "Company Stamp", "Website", "Domain", "Logo", "Office Setup",
         "Initial Equipment", "Other"
     ]
-    vendor: Optional[str] = None
-    description: str
-    amount: float
+    vendor: Optional[str] = Field(None, max_length=120)
+    description: str = Field(..., min_length=1, max_length=500)
+    amount: float = Field(..., gt=0, le=1_000_000_000)
     currency: Currency
     paid_by: Literal["Personal", "Company", "Bahar", "Other"] = "Personal"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=1000)
 
 
 class StartupCost(StartupCostIn):
@@ -132,10 +156,10 @@ class StartupCost(StartupCostIn):
 
 
 class InvestmentIn(BaseModel):
-    date: str
-    amount: float
+    date: str = Field(..., min_length=10, max_length=10)
+    amount: float = Field(..., gt=0, le=1_000_000_000)
     currency: Currency
-    description: Optional[str] = None
+    description: Optional[str] = Field(None, max_length=500)
 
 
 class Investment(InvestmentIn):
@@ -150,12 +174,12 @@ RecurringFrequency = Literal["weekly", "monthly", "yearly"]
 
 
 class RecurringIn(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=80)
     kind: RecurringKind
     frequency: RecurringFrequency
-    next_run: str  # ISO date YYYY-MM-DD when the NEXT posting should happen
+    next_run: str = Field(..., min_length=10, max_length=10)
     active: bool = True
-    template: dict  # payload matching IncomeIn / ExpenseIn / StartupCostIn
+    template: dict
 
 
 class Recurring(RecurringIn):
@@ -232,7 +256,9 @@ def _advance_date(iso_date: str, frequency: str) -> str:
 
 
 async def _process_due_recurring(user_id: str) -> int:
-    """Post any due recurring rules for the user. Returns number of records posted."""
+    """Post any due recurring rules for the user. Returns number of records posted.
+    Enforces a global per-invocation cap (MAX_CATCHUP_POSTS_PER_INVOCATION)
+    to bound DB write amplification even if many rules have very old next_run."""
     today = datetime.now(timezone.utc).date().isoformat()
     posted = 0
     rules = await db.recurring.find(
@@ -240,12 +266,18 @@ async def _process_due_recurring(user_id: str) -> int:
         {"_id": 0},
     ).to_list(500)
     for rule in rules:
+        if posted >= MAX_CATCHUP_POSTS_PER_INVOCATION:
+            break
         next_run = rule["next_run"]
         last_posted = rule.get("last_posted")
         posted_count = rule.get("posted_count", 0)
-        # Safety cap: never post more than 60 catch-ups in a single call
+        # Per-rule cap: never post more than 60 catch-ups in a single call
         catch_up = 0
-        while next_run <= today and catch_up < 60:
+        while (
+            next_run <= today
+            and catch_up < 60
+            and posted < MAX_CATCHUP_POSTS_PER_INVOCATION
+        ):
             record = {
                 **rule["template"],
                 "date": next_run,
@@ -256,7 +288,6 @@ async def _process_due_recurring(user_id: str) -> int:
             }
             kind = rule["kind"]
             if kind == "income":
-                # ensure status present
                 record.setdefault("status", "paid")
                 await db.income.insert_one(record)
             elif kind == "expense":
@@ -279,14 +310,17 @@ async def _process_due_recurring(user_id: str) -> int:
 # ----------- Auth routes -----------
 @api_router.post("/auth/register", response_model=AuthResponse)
 async def register(payload: UserCreate):
-    existing = await db.users.find_one({"email": payload.email.lower()})
+    email = payload.email.lower()
+    existing = await db.users.find_one({"email": email})
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        # Do NOT reveal that the account exists — return the same generic error
+        # as any other invalid input to avoid enumeration.
+        raise HTTPException(status_code=400, detail="Unable to register with the provided credentials")
     user_id = str(uuid.uuid4())
     doc = {
         "id": user_id,
-        "email": payload.email.lower(),
-        "name": payload.name or payload.email.split("@")[0],
+        "email": email,
+        "name": payload.name or email.split("@")[0],
         "hashed_password": hash_password(payload.password),
         "created_at": _iso_now(),
     }
@@ -300,9 +334,21 @@ async def register(payload: UserCreate):
 
 @api_router.post("/auth/login", response_model=AuthResponse)
 async def login(payload: UserLogin):
-    user = await db.users.find_one({"email": payload.email.lower()}, {"_id": 0})
+    email = payload.email.lower()
+    # In-memory brute-force throttle
+    import time as _time
+    now = _time.time()
+    attempts = _LOGIN_ATTEMPTS.get(email, [])
+    attempts = [t for t in attempts if now - t < LOGIN_WINDOW_SEC]
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many attempts, try again later")
+    user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(payload.password, user["hashed_password"]):
+        attempts.append(now)
+        _LOGIN_ATTEMPTS[email] = attempts
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Successful login clears the throttle
+    _LOGIN_ATTEMPTS.pop(email, None)
     token = create_token(user["id"], user["email"])
     return AuthResponse(
         access_token=token,
@@ -380,7 +426,8 @@ async def list_income(
     if status_filter in ("paid", "pending"):
         query["status"] = status_filter
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        term = q[:MAX_SEARCH_LEN]
+        rx = {"$regex": _escape_regex(term), "$options": "i"}
         query["$or"] = [{"client_name": rx}, {"service_description": rx}, {"invoice_number": rx}]
     await _process_due_recurring(current["id"])
     return await db.income.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
@@ -416,7 +463,8 @@ async def list_expenses(
     if category:
         query["category"] = category
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        term = q[:MAX_SEARCH_LEN]
+        rx = {"$regex": _escape_regex(term), "$options": "i"}
         query["$or"] = [{"vendor": rx}, {"description": rx}]
     await _process_due_recurring(current["id"])
     return await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
@@ -484,6 +532,12 @@ async def list_recurring(current=Depends(get_current_user)):
 
 @api_router.post("/recurring", response_model=Recurring)
 async def create_recurring(payload: RecurringIn, current=Depends(get_current_user)):
+    existing_count = await db.recurring.count_documents({"user_id": current["id"]})
+    if existing_count >= MAX_RECURRING_RULES_PER_USER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can have at most {MAX_RECURRING_RULES_PER_USER} recurring rules. Delete unused ones first.",
+        )
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": current["id"],
@@ -641,8 +695,24 @@ async def category_report(current=Depends(get_current_user)):
 
 
 # ----------- CSV Export -----------
+ALLOWED_EXPORT_KINDS = {"all", "income", "expenses", "startup", "investments"}
+CSV_INJECTION_PREFIX = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(v):
+    """Neutralize CSV formula injection: prefix suspicious leading chars with a single quote."""
+    if v is None:
+        return ""
+    s = str(v)
+    if s and s[0] in CSV_INJECTION_PREFIX:
+        return "'" + s
+    return s
+
+
 @api_router.get("/export/csv")
 async def export_csv(kind: str = "all", current=Depends(get_current_user)):
+    if kind not in ALLOWED_EXPORT_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid export kind")
     uid = current["id"]
     output = io.StringIO()
     writer = csv.writer(output)
@@ -652,7 +722,7 @@ async def export_csv(kind: str = "all", current=Depends(get_current_user)):
         writer.writerow(fields)
         rows = await cursor_coll.find({"user_id": uid}, {"_id": 0}).sort("date", -1).to_list(5000)
         for r in rows:
-            writer.writerow([r.get(f, "") for f in fields])
+            writer.writerow([_csv_safe(r.get(f, "")) for f in fields])
         writer.writerow([])
 
     if kind in ("all", "income"):
@@ -710,7 +780,10 @@ async def export_pdf(current=Depends(get_current_user)):
     story.append(Paragraph("EBA Consulting Ltd.", h1))
     story.append(Paragraph(
         f"Financial Summary — generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", meta))
-    story.append(Paragraph(f"Account: {current.get('name') or current['email']}", body))
+    # Escape any HTML/reportlab markup coming from user-controlled strings
+    from xml.sax.saxutils import escape as _xesc
+    account_label = _xesc(current.get('name') or current['email'])
+    story.append(Paragraph(f"Account: {account_label}", body))
 
     # Totals table
     story.append(Paragraph("Totals by Currency", h2))

@@ -42,8 +42,11 @@ class TestHealth:
 # ---------------- Auth ----------------
 class TestAuth:
     def test_register_duplicate(self, user_a):
-        r = requests.post(f"{API}/auth/register", json={"email": user_a["email"], "password": "x"})
+        # Password must satisfy min_length=6 so the request reaches the duplicate-email check.
+        r = requests.post(f"{API}/auth/register", json={"email": user_a["email"], "password": "another123"})
         assert r.status_code == 400
+        # Enumeration-safe: generic detail, not "Email already registered"
+        assert r.json().get("detail") == "Unable to register with the provided credentials"
 
     def test_login_success(self, user_a):
         r = requests.post(f"{API}/auth/login", json={"email": user_a["email"], "password": "secret123"})
