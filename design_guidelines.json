@@ -1,0 +1,214 @@
+{
+  "app_name": "EBA Finance Tracker",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A sharp, minimal, and highly professional iOS-native financial command center anchored by crisp typography, white space, and deep navy blue accents.",
+  "color": {
+    "light": {
+      "surface": "#FFFFFF",
+      "onSurface": "#101828",
+      "surfaceSecondary": "#F9FAFB",
+      "onSurfaceSecondary": "#344054",
+      "surfaceTertiary": "#F2F4F7",
+      "onSurfaceTertiary": "#475467",
+      "surfaceInverse": "#101828",
+      "onSurfaceInverse": "#FFFFFF",
+      "brand": "#003366",
+      "brandPrimary": "#003366",
+      "onBrandPrimary": "#FFFFFF",
+      "brandSecondary": "#336699",
+      "onBrandSecondary": "#FFFFFF",
+      "brandTertiary": "#E6F0FA",
+      "onBrandTertiary": "#003366",
+      "success": "#079455",
+      "onSuccess": "#FFFFFF",
+      "warning": "#DC6803",
+      "onWarning": "#FFFFFF",
+      "error": "#D92D20",
+      "onError": "#FFFFFF",
+      "info": "#003366",
+      "onInfo": "#FFFFFF",
+      "border": "#EAECF0",
+      "borderStrong": "#D0D5DD",
+      "divider": "#F2F4F7"
+    },
+    "dark": {
+      "surface": "#121212",
+      "onSurface": "#F2F4F7",
+      "surfaceSecondary": "#1E1E1E",
+      "onSurfaceSecondary": "#D0D5DD",
+      "surfaceTertiary": "#2C2C2C",
+      "onSurfaceTertiary": "#98A2B3",
+      "surfaceInverse": "#F9FAFB",
+      "onSurfaceInverse": "#101828",
+      "brand": "#3B82F6",
+      "brandPrimary": "#3B82F6",
+      "onBrandPrimary": "#FFFFFF",
+      "brandSecondary": "#60A5FA",
+      "onBrandSecondary": "#121212",
+      "brandTertiary": "#1E3A8A",
+      "onBrandTertiary": "#BFDBFE",
+      "success": "#12B76A",
+      "onSuccess": "#121212",
+      "warning": "#F79009",
+      "onWarning": "#121212",
+      "error": "#F04438",
+      "onError": "#FFFFFF",
+      "info": "#3B82F6",
+      "onInfo": "#FFFFFF",
+      "border": "#344054",
+      "borderStrong": "#475467",
+      "divider": "#1E1E1E"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Geist",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Use iOS-native spacing rhythms, comfortable vertical margins, and generous padding. Do not cram elements together. Forms should have clear grouping.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Apply to sticky headers over scrolling content",
+      "Apply to bottom tab bar when content scrolls behind",
+      "Apply to FABs and modal scrims"
+    ],
+    "dont's": [
+      "Never apply to form fields, body text regions, or cards in dense lists"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Auth",
+      "purpose": "Email/password login and registration for the consulting team.",
+      "states": {
+        "loading": "Centered spinner",
+        "empty": "N/A",
+        "error": "Error toast or readable message below input fields"
+      },
+      "layout": "Hero image at the top with a subtle gradient scrim (dark/light based on theme) transitioning into the form. Single column inputs with labels above. Large sticky primary CTA at the bottom inside KeyboardAvoidingView."
+    },
+    {
+      "name": "Dashboard",
+      "purpose": "Financial command center displaying summary cards, chart, and recent activity.",
+      "states": {
+        "loading": "Skeleton loaders for cards and charts",
+        "empty": "Illustration of an empty vault/wallet + 'No financial data yet. Start tracking income.'",
+        "error": "Error message with a Retry button filling the screen"
+      },
+      "layout": "Scrollview. Top section: 6 summary cards arranged in a 2-column grid using flexWrap, space-between, and md gap. Middle: Income vs Expense chart. Bottom: List of 5 recent transactions. Use glassmorphism on the header."
+    },
+    {
+      "name": "Income",
+      "purpose": "Track and manage consulting income with entry forms.",
+      "states": {
+        "loading": "Skeleton rows",
+        "empty": "Clean line icon + 'No income logged. Tap + to add.'",
+        "error": "Error text + Retry button"
+      },
+      "layout": "Native table view list. Top sticky filter row (chip row) for Search/Currency/Date. Items display Client Name, Date, Amount (with + sign and green color), and a Pending/Paid badge. FAB for adding new income."
+    },
+    {
+      "name": "Expenses",
+      "purpose": "Track operating expenses grouped by category.",
+      "states": {
+        "loading": "Skeleton rows",
+        "empty": "Clean line icon + 'No expenses logged. Tap + to add.'",
+        "error": "Error text + Retry button"
+      },
+      "layout": "Similar to Income. Include small category icons inside brandTertiary rounded squares for each list row. Explicit - sign and dark text for amounts. FAB for adding new expense."
+    },
+    {
+      "name": "Startup Costs",
+      "purpose": "Separate tracking for establishment costs.",
+      "states": {
+        "loading": "Skeleton rows",
+        "empty": "Clean line icon + 'No startup costs logged. Tap + to add.'",
+        "error": "Error text + Retry button"
+      },
+      "layout": "List view with explicit categories (Legal, Equipment, etc.). Total startup cost pinned at the top in a large hero card. Floating action button to add."
+    },
+    {
+      "name": "Reports",
+      "purpose": "Analytical view with monthly/yearly summaries and export options.",
+      "states": {
+        "loading": "Chart skeletons",
+        "empty": "Icon + 'Not enough data to generate reports.'",
+        "error": "Error text + Retry button"
+      },
+      "layout": "Segmented control at the top to toggle Monthly/Yearly/Category/Cash Flow. Below: relevant chart, followed by a breakdown list. Export CTA buttons (CSV/PDF) fixed at the bottom."
+    },
+    {
+      "name": "Settings",
+      "purpose": "App configurations including dark mode, profile, and logout.",
+      "states": {
+        "loading": "Spinner",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Grouped list style (iOS native settings). Rows for Dark Mode toggle, Multi-currency default, Profile Info, and a destructive Logout button at the bottom."
+    }
+  ],
+  "images": {
+    "auth_hero": {
+      "url": "https://images.unsplash.com/photo-1483366774565-c783b9f70e2c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwbW9kZXJuJTIwd2hpdGUlMjBvZmZpY2UlMjBhcmNoaXRlY3R1cmV8ZW58MHx8fHwxNzg0MTc0NDE2fDA&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1614850523011-8f49ffc73908?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MTN8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBuYXZ5JTIwYmx1ZSUyMGFic3RyYWN0JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODQxNzQ0MTd8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern minimal office architecture for auth background"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow 1 iOS-Native Clean personality. Ensure generous padding, white space, and large tap targets (minimum 44x44pt).",
+    "Use the Navy Blue (#003366) brand color deliberately for primary accents and buttons, maintaining high contrast against white backgrounds. Do not overuse it on large surfaces in light mode.",
+    "Implement a 6-tab bottom navigation exactly as the user requested (Dashboard, Income, Expenses, Startup Costs, Reports, Settings). Since 6 tabs can be tight on mobile, ensure the font size adjusts to fit or use a highly compact, clean layout for the tab bar.",
+    "For the Dashboard, render the 6 summary cards using a 2-column flex layout (width roughly 48% with space-between).",
+    "In transaction lists (Income, Expenses), implement iOS multi-currency patterns: prominently display the currency code (EUR, TRY, GBP) or symbol right next to the amount. Use a positive sign (+) and green for income, and a negative sign (-) with dark grey/red for expenses.",
+    "Ensure the hero image on the Auth screen implements a mandatory gradient scrim (transparent to surface color) layered between the image and the form, ensuring the form remains perfectly readable.",
+    "All forms (Add Income, Add Expense, etc.) must have labels *above* the input fields, single-column layout, and a sticky Submit button anchored to the bottom inside a KeyboardAvoidingView.",
+    "Always wrap interactive elements in Pressable with a hitSlop if smaller than 44x44pt.",
+    "Apply Glassmorphism to sticky headers, tab bars, and bottom sheets where applicable to elevate the iOS-native feel.",
+    "For empty states, ensure they fill the screen (flex: 1) with a centered icon/illustration, a brief descriptive text, and a primary CTA."
+  ],
+  "haptics": {
+    "button_press": "selection",
+    "tab_change": "selection",
+    "success_action": "notificationSuccess",
+    "error_action": "notificationError",
+    "toggle_switch": "impactLight"
+  }
+}
