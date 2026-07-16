@@ -85,3 +85,4 @@ android-sdk/
 **/.env
 .env.*
 !.env.example
+app_workspace.zip

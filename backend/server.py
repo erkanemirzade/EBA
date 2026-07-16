@@ -52,11 +52,34 @@ def _escape_regex(s: str) -> str:
     return _re.escape(s)
 
 
-# Very small in-memory login throttle (per-email). MVP protection only —
-# does not survive restarts and is not cluster-safe, but blocks trivial brute-force.
-_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+# MongoDB-backed login throttle: entries auto-expire via TTL index.
+# Cluster-safe and survives restarts (unlike an in-memory dict).
 LOGIN_WINDOW_SEC = 60
 LOGIN_MAX_ATTEMPTS = 8
+
+
+async def _ensure_login_ttl_index():
+    try:
+        await db.login_attempts.create_index("email")
+        await db.login_attempts.create_index("ts", expireAfterSeconds=LOGIN_WINDOW_SEC)
+    except Exception:
+        pass
+
+
+async def _login_attempts_count(email: str) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=LOGIN_WINDOW_SEC)
+    return await db.login_attempts.count_documents({"email": email, "ts": {"$gt": cutoff}})
+
+
+async def _record_login_failure(email: str) -> None:
+    await db.login_attempts.insert_one({
+        "email": email,
+        "ts": datetime.now(timezone.utc),
+    })
+
+
+async def _clear_login_attempts(email: str) -> None:
+    await db.login_attempts.delete_many({"email": email})
 
 app = FastAPI(title="EBA Finance Tracker API", lifespan=None)  # lifespan set below
 api_router = APIRouter(prefix="/api")
@@ -335,20 +358,16 @@ async def register(payload: UserCreate):
 @api_router.post("/auth/login", response_model=AuthResponse)
 async def login(payload: UserLogin):
     email = payload.email.lower()
-    # In-memory brute-force throttle
-    import time as _time
-    now = _time.time()
-    attempts = _LOGIN_ATTEMPTS.get(email, [])
-    attempts = [t for t in attempts if now - t < LOGIN_WINDOW_SEC]
-    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+    # MongoDB-backed brute-force throttle
+    count = await _login_attempts_count(email)
+    if count >= LOGIN_MAX_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Too many attempts, try again later")
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(payload.password, user["hashed_password"]):
-        attempts.append(now)
-        _LOGIN_ATTEMPTS[email] = attempts
+        await _record_login_failure(email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     # Successful login clears the throttle
-    _LOGIN_ATTEMPTS.pop(email, None)
+    await _clear_login_attempts(email)
     token = create_token(user["id"], user["email"])
     return AuthResponse(
         access_token=token,
