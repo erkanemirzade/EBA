@@ -89,7 +89,7 @@ export default function SettingsScreen() {
         <View style={[styles.group, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
           <Pressable
             testID="settings-signout"
-            onPress={signOut}
+            onPress={async () => { await signOut(); router.replace('/(auth)/sign-in'); }}
             style={styles.row}
           >
             <View style={styles.rowLeft}>
