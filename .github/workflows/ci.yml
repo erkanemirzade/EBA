@@ -32,11 +32,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Node (stable)
+        uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '18.x'
           cache: 'yarn'
+      - name: Diagnostic: show versions
+        run: |
+          node --version || true
+          npm --version || true
+          yarn --version || true
       - name: Install frontend deps
         run: |
           cd frontend
