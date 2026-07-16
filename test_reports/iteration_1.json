@@ -1,0 +1,55 @@
+{
+  "summary": "End-to-end testing of EBA Finance Tracker (backend + Expo web). Backend pytest suite (20/20 passing) validated health, register/login/me, CRUD for income/expenses/startup/investments with user scoping and enum validation, /api/summary with correct multi-currency totals + available_cash math, monthly & category reports, and CSV export for all 5 kinds. Frontend flow tested end-to-end on mobile viewport: registration → dashboard shows 6 summary cards + EUR/TRY/GBP rows, added income (Acme Ltd €1,500), expense (Adobe €50), startup cost (Company Registration Notary €800), investment (€5,000), all reflected on dashboard (Total Income €1,500, Operating Expenses €50, Startup Costs €800, Personal Investment €5,000, Net Cash Balance €650, Available Cash €6,450 — math correct). Reports tabs Monthly/Category/Cash Flow render. Dark-mode toggle switches theme. ONE bug found: after tapping Sign Out from Settings, the app remains on /settings (no redirect to /(auth)/sign-in). Auth state clears (user name disappears) but there is no guard/redirect, leaving the tab shell visible.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "settings.tsx signOut handler",
+        "issue": "Sign Out clears auth state but does not navigate away. User remains on /settings with tab bar visible and no way to reach sign-in without app reload. Reference: /app/frontend/app/(tabs)/settings.tsx:92 (onPress={signOut}) — needs router.replace('/(auth)/sign-in') after signOut, or a global auth guard in (tabs)/_layout.tsx that redirects when user===null.",
+        "testID": "settings-signout",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "sign-in / sign-up",
+        "issues": [
+          "Console warns: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — some component still uses shadowOffset/shadowOpacity etc. React Native Web recommends boxShadow. Non-blocking."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_eba_finance.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add navigation on sign-out: after `await signOut()` (in settings.tsx onPress) call `router.replace('/(auth)/sign-in')`, OR add an auth guard in app/(tabs)/_layout.tsx that redirects to sign-in when user===null (recommended — protects every tab, not just settings).",
+    "Optionally replace legacy shadow* style props with boxShadow for cross-platform correctness (silences RN Web deprecation warnings)."
+  ],
+  "critical_code_review_comments": [
+    "server.py already excludes _id via projection {\"_id\": 0} — good.",
+    "Auth token stored via expo-secure-store (via src/utils/storage) — good.",
+    "All backend routes properly prefixed with /api — good.",
+    "Frontend uses process.env.EXPO_PUBLIC_BACKEND_URL — good.",
+    "server.py uses @app.on_event('shutdown') which is deprecated in FastAPI 0.109+; consider migrating to lifespan handler.",
+    "server.py is 500 lines — still within limits, but could split routers by resource if it grows."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_eba_finance.py (created — 20 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest)",
+    "frontend": "~95% (all screens + all CRUD flows work; sign-out redirect missing)"
+  },
+  "seed_data_creation": "Two fresh test users registered via API (TEST_a_*, TEST_b_*) — data cleaned up via teardown fixtures. One test user registered via UI (ui2_*@example.com) with income/expense/startup/investment records; not cleaned up (small, isolated).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend is solid — 20/20 pytest passes. If retesting only frontend sign-out fix: (1) register a new user via UI, (2) navigate to Settings tab, (3) tap [data-testid=settings-signout], (4) assert page.url ends with /sign-in AND [data-testid=sign-in-email-input] is visible within 3s. Tab bar text-selectors matched via aria-label suffix (see click_tab helper) since Expo Router adds icon glyph before label.",
+  "rca_of_issue": "Sign-out bug RCA: In /app/frontend/app/(tabs)/settings.tsx the Pressable at line 91-92 calls signOut directly (`onPress={signOut}`). signOut (src/ctx/auth.tsx L48-51) only clears secure store token and setUser(null). No navigation is triggered. Also, app/(tabs)/_layout.tsx has no auth-guard useEffect. app/index.tsx does route based on user but is only mounted at '/' — after signOut the route is still '/settings', so index.tsx effect never runs. Fix options: (A) simplest — wrap the settings signout handler: `onPress={async () => { await signOut(); router.replace('/(auth)/sign-in'); }}`. (B) better — in app/(tabs)/_layout.tsx add `useEffect(() => { if (!loading && !user) router.replace('/(auth)/sign-in'); }, [user, loading])` so the guard also covers deep-linked unauthenticated access."
+}

@@ -1,0 +1,3 @@
+{
+  "ignore_dirs": [".git", ".metro-cache", ".expo", "android", "ios"]
+}
