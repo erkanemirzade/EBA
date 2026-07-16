@@ -65,6 +65,61 @@ export default function Dashboard() {
     { key: 'available', label: 'Available Cash', icon: 'cash', color: c.success, values: summary.available_cash },
   ] : [];
 
+  // Currency risk exposure: detect if income concentration in one currency is >60%
+  // while expenses lean heavily on another → recommend hedge / invoicing shift.
+  const currencyInsight = (() => {
+    if (!summary) return null;
+    const totalIncome = CURRENCIES.reduce((s, cur) => s + (summary.total_income[cur] || 0), 0);
+    const totalPending = CURRENCIES.reduce((s, cur) => s + (summary.pending_income[cur] || 0), 0);
+    const totalExpense = CURRENCIES.reduce((s, cur) => s + (summary.total_expenses[cur] || 0), 0);
+    if (totalIncome + totalPending < 100) return null;
+
+    const shares = CURRENCIES.map((cur) => ({
+      cur,
+      incShare: totalIncome > 0 ? (summary.total_income[cur] || 0) / totalIncome : 0,
+      pendShare: totalPending > 0 ? (summary.pending_income[cur] || 0) / totalPending : 0,
+      expShare: totalExpense > 0 ? (summary.total_expenses[cur] || 0) / totalExpense : 0,
+    }));
+
+    const domIncome = shares.reduce((a, b) => (b.incShare > a.incShare ? b : a));
+    const domExpense = shares.reduce((a, b) => (b.expShare > a.expShare ? b : a));
+
+    // Pending-heavy warning
+    if (totalPending > totalIncome && totalPending > 0) {
+      const domPend = shares.reduce((a, b) => (b.pendShare > a.pendShare ? b : a));
+      return {
+        tone: 'warning' as const,
+        title: 'Cash flow risk',
+        body: `You're holding ${Math.round(domPend.pendShare * 100)}% of pending receivables in ${domPend.cur}. Follow up on invoices to unlock cash.`,
+      };
+    }
+
+    // Mismatch: income currency ≠ dominant expense currency
+    if (domIncome.cur !== domExpense.cur && domIncome.incShare > 0.6 && domExpense.expShare > 0.4) {
+      return {
+        tone: 'warning' as const,
+        title: 'FX exposure',
+        body: `${Math.round(domIncome.incShare * 100)}% of your income is in ${domIncome.cur} but ${Math.round(domExpense.expShare * 100)}% of expenses are in ${domExpense.cur}. Consider invoicing more in ${domExpense.cur} to hedge.`,
+      };
+    }
+
+    // Concentration risk
+    if (domIncome.incShare > 0.8) {
+      return {
+        tone: 'info' as const,
+        title: 'Currency concentration',
+        body: `${Math.round(domIncome.incShare * 100)}% of your income sits in ${domIncome.cur}. Diversifying across currencies can reduce FX risk.`,
+      };
+    }
+
+    // Healthy state
+    return {
+      tone: 'success' as const,
+      title: 'Currency balance looks healthy',
+      body: 'Your income and expenses are well distributed across currencies.',
+    };
+  })();
+
   // Compute chart data (income vs expense by currency)
   const chartMax = summary ? Math.max(
     ...CURRENCIES.flatMap((cur) => [summary.total_income[cur] || 0, summary.total_expenses[cur] || 0]),
@@ -116,6 +171,42 @@ export default function Dashboard() {
               </View>
             ))}
           </View>
+
+          {currencyInsight && (
+            <View
+              testID="currency-insight-card"
+              style={[
+                styles.insightCard,
+                {
+                  backgroundColor:
+                    currencyInsight.tone === 'warning' ? c.warning + '15' :
+                    currencyInsight.tone === 'success' ? c.success + '15' : c.brandTertiary,
+                  borderColor:
+                    currencyInsight.tone === 'warning' ? c.warning + '40' :
+                    currencyInsight.tone === 'success' ? c.success + '40' : c.brand + '30',
+                },
+              ]}
+            >
+              <View style={[styles.insightIcon, {
+                backgroundColor:
+                  currencyInsight.tone === 'warning' ? c.warning :
+                  currencyInsight.tone === 'success' ? c.success : c.brand,
+              }]}>
+                <Ionicons
+                  name={
+                    currencyInsight.tone === 'warning' ? 'warning' :
+                    currencyInsight.tone === 'success' ? 'checkmark' : 'sparkles'
+                  }
+                  size={14}
+                  color="#FFF"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.insightTitle, { color: c.onSurface }]}>{currencyInsight.title}</Text>
+                <Text style={[styles.insightBody, { color: c.onSurfaceSecondary }]}>{currencyInsight.body}</Text>
+              </View>
+            </View>
+          )}
 
           <Text style={[styles.sectionTitle, { color: c.onSurface }]}>Income vs Expenses</Text>
           <View style={[styles.chartCard, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
@@ -194,6 +285,10 @@ const styles = StyleSheet.create({
   cardIcon: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   cardLabel: { fontSize: 11, fontWeight: '500', marginBottom: spacing.xs },
   cardAmount: { fontSize: 13, fontWeight: '700', marginTop: 1 },
+  insightCard: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, marginTop: spacing.xs, marginBottom: spacing.md },
+  insightIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  insightTitle: { fontSize: 13, fontWeight: '700', marginBottom: 3 },
+  insightBody: { fontSize: 12, lineHeight: 17 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginTop: spacing.lg, marginBottom: spacing.md },
   chartCard: { padding: spacing.lg, borderRadius: radius.md, borderWidth: 1 },
   chartLabel: { fontSize: 12, fontWeight: '600', marginBottom: spacing.xs },

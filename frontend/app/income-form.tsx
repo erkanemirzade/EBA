@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/src/api';
@@ -17,6 +17,9 @@ function todayISO() {
 export default function IncomeForm() {
   const { c } = useTheme();
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const editing = !!id;
+
   const [date, setDate] = useState(todayISO());
   const [client, setClient] = useState('');
   const [service, setService] = useState('');
@@ -26,7 +29,28 @@ export default function IncomeForm() {
   const [status, setStatus] = useState('paid');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(editing);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      try {
+        const rows = await api.get<any[]>('/income');
+        const item = rows.find((r) => r.id === id);
+        if (item) {
+          setDate(item.date);
+          setClient(item.client_name);
+          setService(item.service_description);
+          setInvoice(item.invoice_number || '');
+          setAmount(String(item.amount));
+          setCurrency(item.currency);
+          setStatus(item.status);
+          setNotes(item.notes || '');
+        }
+      } finally { setLoading(false); }
+    })();
+  }, [id, editing]);
 
   const save = async () => {
     setErr(null);
@@ -35,11 +59,13 @@ export default function IncomeForm() {
     if (isNaN(n) || n <= 0) { setErr('Enter a valid amount'); return; }
     setSaving(true);
     try {
-      await api.post('/income', {
+      const payload = {
         date, client_name: client, service_description: service,
         invoice_number: invoice || undefined, amount: n, currency, status,
         notes: notes || undefined,
-      });
+      };
+      if (editing) await api.put(`/income/${id}`, payload);
+      else await api.post('/income', payload);
       router.back();
     } catch (e: any) {
       setErr(e.message || 'Save failed');
@@ -55,11 +81,16 @@ export default function IncomeForm() {
           <Pressable testID="income-form-close" onPress={() => router.back()} hitSlop={12} style={styles.iconBtn}>
             <Ionicons name="close" size={24} color={c.onSurface} />
           </Pressable>
-          <Text style={[styles.title, { color: c.onSurface }]}>New Income</Text>
+          <Text style={[styles.title, { color: c.onSurface }]}>{editing ? 'Edit Income' : 'New Income'}</Text>
           <View style={{ width: 40 }} />
         </View>
       </SafeAreaView>
 
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={c.brand} />
+        </View>
+      ) : (
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
           <LabeledInput testID="income-form-client" label="Client Name *" value={client} onChangeText={setClient} placeholder="Acme Ltd." />
@@ -81,10 +112,11 @@ export default function IncomeForm() {
             disabled={saving}
             style={({ pressed }) => [styles.cta, { backgroundColor: c.brand, opacity: pressed || saving ? 0.85 : 1 }]}
           >
-            {saving ? <ActivityIndicator color={c.onBrand} /> : <Text style={[styles.ctaText, { color: c.onBrand }]}>Save Income</Text>}
+            {saving ? <ActivityIndicator color={c.onBrand} /> : <Text style={[styles.ctaText, { color: c.onBrand }]}>{editing ? 'Update' : 'Save Income'}</Text>}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      )}
     </View>
   );
 }

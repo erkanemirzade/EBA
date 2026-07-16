@@ -1,9 +1,10 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Query
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
 import os
 import io
 import csv
@@ -15,6 +16,11 @@ from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional, Literal
 from datetime import datetime, timedelta, timezone
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors as rlcolors
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 
 ROOT_DIR = Path(__file__).parent
@@ -28,7 +34,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "eba-finance-tracker-super-secret-key-
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
 
-app = FastAPI(title="EBA Finance Tracker API")
+app = FastAPI(title="EBA Finance Tracker API", lifespan=None)  # lifespan set below
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 
@@ -251,9 +257,36 @@ async def _update(collection, user_id: str, item_id: str, data: dict) -> dict:
 
 
 # ----------- Income routes -----------
+def _apply_filters(query: dict, date_from: Optional[str], date_to: Optional[str], currency: Optional[str]):
+    if date_from or date_to:
+        rng: dict = {}
+        if date_from:
+            rng["$gte"] = date_from
+        if date_to:
+            rng["$lte"] = date_to
+        query["date"] = rng
+    if currency:
+        query["currency"] = currency
+    return query
+
+
 @api_router.get("/income", response_model=List[Income])
-async def list_income(current=Depends(get_current_user)):
-    return await _list(db.income, current["id"])
+async def list_income(
+    current=Depends(get_current_user),
+    q: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    currency: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status"),
+):
+    query: dict = {"user_id": current["id"]}
+    _apply_filters(query, date_from, date_to, currency)
+    if status_filter in ("paid", "pending"):
+        query["status"] = status_filter
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"client_name": rx}, {"service_description": rx}, {"invoice_number": rx}]
+    return await db.income.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
 
 
 @api_router.post("/income", response_model=Income)
@@ -273,8 +306,22 @@ async def delete_income(item_id: str, current=Depends(get_current_user)):
 
 # ----------- Expense routes -----------
 @api_router.get("/expenses", response_model=List[Expense])
-async def list_expenses(current=Depends(get_current_user)):
-    return await _list(db.expenses, current["id"])
+async def list_expenses(
+    current=Depends(get_current_user),
+    q: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    currency: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+):
+    query: dict = {"user_id": current["id"]}
+    _apply_filters(query, date_from, date_to, currency)
+    if category:
+        query["category"] = category
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"vendor": rx}, {"description": rx}]
+    return await db.expenses.find(query, {"_id": 0}).sort("date", -1).to_list(2000)
 
 
 @api_router.post("/expenses", response_model=Expense)
@@ -478,6 +525,120 @@ async def export_csv(kind: str = "all", current=Depends(get_current_user)):
     )
 
 
+# ----------- PDF Summary Export -----------
+def _fmt_money(amount: float, currency: str) -> str:
+    sym = {"EUR": "€", "TRY": "₺", "GBP": "£"}.get(currency, "")
+    return f"{sym}{amount:,.2f}"
+
+
+@api_router.get("/export/pdf")
+async def export_pdf(current=Depends(get_current_user)):
+    uid = current["id"]
+    income = await db.income.find({"user_id": uid}, {"_id": 0}).sort("date", -1).to_list(5000)
+    expenses = await db.expenses.find({"user_id": uid}, {"_id": 0}).sort("date", -1).to_list(5000)
+    startup = await db.startup_costs.find({"user_id": uid}, {"_id": 0}).sort("date", -1).to_list(5000)
+    investments = await db.investments.find({"user_id": uid}, {"_id": 0}).sort("date", -1).to_list(5000)
+
+    total_income = _sum_by_currency(income, lambda r: r.get("status") == "paid")
+    total_expenses = _sum_by_currency(expenses)
+    total_startup = _sum_by_currency(startup)
+    total_investments = _sum_by_currency(investments)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm,
+                            leftMargin=15 * mm, rightMargin=15 * mm)
+    styles = getSampleStyleSheet()
+    navy = rlcolors.HexColor("#003366")
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=navy, fontSize=20, spaceAfter=6)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=navy, fontSize=13, spaceBefore=10, spaceAfter=6)
+    meta = ParagraphStyle("meta", parent=styles["Normal"], textColor=rlcolors.grey, fontSize=9, spaceAfter=14)
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10)
+
+    story = []
+    story.append(Paragraph("EBA Consulting Ltd.", h1))
+    story.append(Paragraph(
+        f"Financial Summary — generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", meta))
+    story.append(Paragraph(f"Account: {current.get('name') or current['email']}", body))
+
+    # Totals table
+    story.append(Paragraph("Totals by Currency", h2))
+    totals_rows = [["Metric", "EUR", "TRY", "GBP"]]
+    for label, values in [
+        ("Total Income (paid)", total_income),
+        ("Operating Expenses", total_expenses),
+        ("Startup Costs", total_startup),
+        ("Personal Investment", total_investments),
+    ]:
+        totals_rows.append([label] + [_fmt_money(values[c], c) for c in ("EUR", "TRY", "GBP")])
+    t = Table(totals_rows, colWidths=[65 * mm, 35 * mm, 35 * mm, 35 * mm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), navy),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rlcolors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rlcolors.HexColor("#F9FAFB"), rlcolors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.3, rlcolors.HexColor("#EAECF0")),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t)
+
+    def _section_table(title: str, rows: list, headers: list, fields: list):
+        story.append(Paragraph(title, h2))
+        if not rows:
+            story.append(Paragraph("<i>No entries.</i>", body))
+            return
+        data = [headers]
+        for r in rows[:100]:
+            data.append([str(r.get(f, "") or "-") for f in fields])
+        tbl = Table(data, hAlign="LEFT")
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rlcolors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rlcolors.HexColor("#F9FAFB"), rlcolors.white]),
+            ("GRID", (0, 0), (-1, -1), 0.3, rlcolors.HexColor("#EAECF0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(tbl)
+
+    _section_table(
+        "Income", income,
+        ["Date", "Client", "Service", "Amount", "Cur", "Status"],
+        ["date", "client_name", "service_description", "amount", "currency", "status"],
+    )
+    _section_table(
+        "Operating Expenses", expenses,
+        ["Date", "Category", "Vendor", "Amount", "Cur", "Paid By"],
+        ["date", "category", "vendor", "amount", "currency", "paid_by"],
+    )
+    _section_table(
+        "Startup Costs", startup,
+        ["Date", "Category", "Description", "Amount", "Cur", "Paid By"],
+        ["date", "category", "description", "amount", "currency", "paid_by"],
+    )
+    _section_table(
+        "Personal Investment", investments,
+        ["Date", "Amount", "Cur", "Description"],
+        ["date", "amount", "currency", "description"],
+    )
+
+    doc.build(story)
+    buf.seek(0)
+    filename = f"eba-finance-summary-{datetime.now().strftime('%Y%m%d')}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @api_router.get("/")
 async def root():
     return {"app": "EBA Finance Tracker", "status": "ok"}
@@ -494,6 +655,9 @@ app.add_middleware(
 )
 
 
-@app.on_event("shutdown")
+@app.get("/")
+async def app_root():
+    return {"app": "EBA Finance Tracker", "status": "ok"}
+
 async def shutdown_db_client():
     client.close()

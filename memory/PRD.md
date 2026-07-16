@@ -31,3 +31,10 @@ Navy blue (`#003366`) accents on white background, iOS-native rhythm (8pt grid),
 
 ## Future (deferred per spec)
 Invoice generation, VAT/tax reports, bank integration, OCR receipt scanning, client management, project profitability, recurring expenses, budgets.
+
+## Iteration 2 additions (Feb 2026)
+- **Edit-in-place**: tap any income/expense/startup row → form opens pre-filled → PUT to update. Save button reads `Update`.
+- **Search & filter**: `/api/income` and `/api/expenses` accept `q`, `date_from`, `date_to`, `currency`, `status`/`category`. Frontend adds search bar + existing chips already handle currency/status/category.
+- **PDF summary export**: `/api/export/pdf` via reportlab renders a full statement (totals table + income/expenses/startup/investments sections) with navy branding. Reports tab has a prominent "PDF Summary" CTA + secondary CSV file buttons. On native, downloads to cache and opens the native share sheet via `expo-sharing`.
+- **Smart currency-risk card**: Dashboard shows a contextual insight (`currency-insight-card`) — concentration warning if >80% of income in one currency, FX-exposure warning if income vs expense currency mismatch, pending-receivables warning if pending > received, or healthy state when balanced.
+- **Modernization**: RN `shadow*` styles migrated to `boxShadow`; FastAPI `on_event('shutdown')` migrated to `lifespan` context manager.

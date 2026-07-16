@@ -40,6 +40,18 @@ export const api = {
   put: <T>(path: string, body?: any) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body || {}) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  getBlob: async (path: string): Promise<{ blob: Blob; filename: string }> => {
+    const token = await tokenStore.get();
+    const res = await fetch(`${BASE_URL}/api${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const disp = res.headers.get('Content-Disposition') || '';
+    const m = /filename="?([^"]+)"?/.exec(disp);
+    const filename = m ? m[1] : 'download';
+    const blob = await res.blob();
+    return { blob, filename };
+  },
 };
 
 export const BACKEND_URL = BASE_URL;

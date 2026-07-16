@@ -75,7 +75,11 @@ export default function StartupScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={c.brand} />}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           renderItem={({ item }) => (
-            <View testID={`startup-row-${item.id}`} style={[styles.row, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
+            <Pressable
+              testID={`startup-row-${item.id}`}
+              onPress={() => router.push({ pathname: '/startup-form', params: { id: item.id } })}
+              style={({ pressed }) => [styles.row, { backgroundColor: c.surfaceSecondary, borderColor: c.border, opacity: pressed ? 0.8 : 1 }]}
+            >
               <View style={[styles.catIcon, { backgroundColor: c.warning + '20' }]}>
                 <Ionicons name="rocket-outline" size={18} color={c.warning} />
               </View>
@@ -90,7 +94,7 @@ export default function StartupScreen() {
                   <Ionicons name="trash-outline" size={16} color={c.muted} style={{ marginTop: 8 }} />
                 </Pressable>
               </View>
-            </View>
+            </Pressable>
           )}
         />
       )}
@@ -127,6 +131,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute', right: spacing.lg, bottom: 100, width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 6,
+    boxShadow: '0 4px 8px rgba(0,0,0,0.2)', elevation: 6,
   },
 });

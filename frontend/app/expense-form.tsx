@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/src/api';
@@ -18,6 +18,9 @@ function todayISO() { return new Date().toISOString().slice(0, 10); }
 export default function ExpenseForm() {
   const { c } = useTheme();
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const editing = !!id;
+
   const [date, setDate] = useState(todayISO());
   const [category, setCategory] = useState('Office');
   const [vendor, setVendor] = useState('');
@@ -28,7 +31,29 @@ export default function ExpenseForm() {
   const [paidBy, setPaidBy] = useState('Company');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(editing);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      try {
+        const rows = await api.get<any[]>('/expenses');
+        const item = rows.find((r) => r.id === id);
+        if (item) {
+          setDate(item.date);
+          setCategory(item.category);
+          setVendor(item.vendor);
+          setDescription(item.description);
+          setAmount(String(item.amount));
+          setCurrency(item.currency);
+          setPayMethod(item.payment_method || '');
+          setPaidBy(item.paid_by || 'Company');
+          setNotes(item.notes || '');
+        }
+      } finally { setLoading(false); }
+    })();
+  }, [id, editing]);
 
   const save = async () => {
     setErr(null);
@@ -37,11 +62,13 @@ export default function ExpenseForm() {
     if (isNaN(n) || n <= 0) { setErr('Enter a valid amount'); return; }
     setSaving(true);
     try {
-      await api.post('/expenses', {
+      const payload = {
         date, category, vendor, description, amount: n, currency,
         payment_method: payMethod || undefined, paid_by: paidBy,
         notes: notes || undefined,
-      });
+      };
+      if (editing) await api.put(`/expenses/${id}`, payload);
+      else await api.post('/expenses', payload);
       router.back();
     } catch (e: any) {
       setErr(e.message || 'Save failed');
@@ -57,11 +84,16 @@ export default function ExpenseForm() {
           <Pressable testID="expense-form-close" onPress={() => router.back()} hitSlop={12} style={styles.iconBtn}>
             <Ionicons name="close" size={24} color={c.onSurface} />
           </Pressable>
-          <Text style={[styles.title, { color: c.onSurface }]}>New Expense</Text>
+          <Text style={[styles.title, { color: c.onSurface }]}>{editing ? 'Edit Expense' : 'New Expense'}</Text>
           <View style={{ width: 40 }} />
         </View>
       </SafeAreaView>
 
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={c.brand} />
+        </View>
+      ) : (
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
           <Chips label="Category" options={CATEGORIES} value={category} onChange={setCategory} testIDPrefix="expense-form-category" />
@@ -84,10 +116,11 @@ export default function ExpenseForm() {
             disabled={saving}
             style={({ pressed }) => [styles.cta, { backgroundColor: c.brand, opacity: pressed || saving ? 0.85 : 1 }]}
           >
-            {saving ? <ActivityIndicator color={c.onBrand} /> : <Text style={[styles.ctaText, { color: c.onBrand }]}>Save Expense</Text>}
+            {saving ? <ActivityIndicator color={c.onBrand} /> : <Text style={[styles.ctaText, { color: c.onBrand }]}>{editing ? 'Update' : 'Save Expense'}</Text>}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      )}
     </View>
   );
 }

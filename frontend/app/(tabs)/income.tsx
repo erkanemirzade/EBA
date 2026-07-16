@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,24 +22,25 @@ export default function IncomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('All');
+  const [search, setSearch] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<IncomeRow[]>('/income');
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('q', search.trim());
+      if (filter === 'Paid') params.set('status', 'paid');
+      else if (filter === 'Pending') params.set('status', 'pending');
+      else if (CURRENCIES.includes(filter as any)) params.set('currency', filter);
+      const qs = params.toString();
+      const r = await api.get<IncomeRow[]>(`/income${qs ? '?' + qs : ''}`);
       setRows(r);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [filter, search]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  const filtered = rows.filter((r) => {
-    if (filter === 'All') return true;
-    if (filter === 'Paid' || filter === 'Pending') return r.status === filter.toLowerCase();
-    return r.currency === filter;
-  });
 
   const handleDelete = async (id: string) => {
     await api.del(`/income/${id}`);
@@ -54,27 +55,50 @@ export default function IncomeScreen() {
           <Text style={[styles.subtitle, { color: c.onSurfaceSecondary }]}>{rows.length} entries</Text>
         </View>
         <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
+          <View style={[styles.searchWrap, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
+            <Ionicons name="search" size={16} color={c.muted} />
+            <TextInput
+              testID="income-search"
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search client, service, invoice…"
+              placeholderTextColor={c.muted}
+              style={[styles.searchInput, { color: c.onSurface }]}
+              returnKeyType="search"
+            />
+            {search ? (
+              <Pressable testID="income-search-clear" onPress={() => setSearch('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={c.muted} />
+              </Pressable>
+            ) : null}
+          </View>
           <Chips options={FILTERS} value={filter} onChange={setFilter} testIDPrefix="income-filter" />
         </View>
       </SafeAreaView>
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator color={c.brand} size="large" /></View>
-      ) : filtered.length === 0 ? (
+      ) : rows.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="trending-up-outline" size={40} color={c.muted} />
-          <Text style={[styles.emptyText, { color: c.onSurfaceSecondary }]}>No income logged</Text>
-          <Text style={[styles.emptySub, { color: c.muted }]}>Tap + to add your first income</Text>
+          <Text style={[styles.emptyText, { color: c.onSurfaceSecondary }]}>
+            {search ? 'No matches' : 'No income logged'}
+          </Text>
+          <Text style={[styles.emptySub, { color: c.muted }]}>{search ? 'Try a different search' : 'Tap + to add your first income'}</Text>
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={c.brand} />}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           renderItem={({ item }) => (
-            <View testID={`income-row-${item.id}`} style={[styles.row, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}>
+            <Pressable
+              testID={`income-row-${item.id}`}
+              onPress={() => router.push({ pathname: '/income-form', params: { id: item.id } })}
+              style={({ pressed }) => [styles.row, { backgroundColor: c.surfaceSecondary, borderColor: c.border, opacity: pressed ? 0.8 : 1 }]}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={[styles.rowTitle, { color: c.onSurface }]}>{item.client_name}</Text>
                 <Text style={[styles.rowSub, { color: c.onSurfaceSecondary }]} numberOfLines={1}>
@@ -97,7 +121,7 @@ export default function IncomeScreen() {
                   <Ionicons name="trash-outline" size={16} color={c.muted} style={{ marginTop: 8 }} />
                 </Pressable>
               </View>
-            </View>
+            </Pressable>
           )}
         />
       )}
@@ -118,6 +142,8 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 26, fontWeight: '700' },
   subtitle: { fontSize: 13, marginTop: 2 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, height: 44, borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.md },
+  searchInput: { flex: 1, fontSize: 14, height: '100%' },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   emptyText: { fontSize: 15, fontWeight: '600' },
@@ -132,6 +158,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute', right: spacing.lg, bottom: 100, width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 6,
+    boxShadow: '0 4px 8px rgba(0,0,0,0.2)', elevation: 6,
   },
 });

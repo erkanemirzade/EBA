@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,29 +45,41 @@ export default function ReportsScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const exportCSV = async (kind: string) => {
+  const exportFile = async (kind: 'csv' | 'pdf', csvKind: string = 'all') => {
     const token = await tokenStore.get();
-    const url = `${BACKEND_URL}/api/export/csv?kind=${kind}`;
+    const path = kind === 'pdf' ? '/export/pdf' : `/export/csv?kind=${csvKind}`;
+    const url = `${BACKEND_URL}/api${path}`;
     if (Platform.OS === 'web') {
-      // Fetch as blob and download
       try {
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `eba-finance-${kind}.csv`;
+        a.download = kind === 'pdf'
+          ? `eba-finance-summary-${new Date().toISOString().slice(0, 10)}.pdf`
+          : `eba-finance-${csvKind}-${new Date().toISOString().slice(0, 10)}.csv`;
         a.click();
       } catch {}
-    } else {
-      // Open in browser; user can save. Include token in URL header via WebBrowser isn't possible; use auth in URL? Simpler: fetch and share.
-      try {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        const text = await res.text();
-        // Show inline via data URL
-        const dataUrl = `data:text/csv;charset=utf-8,${encodeURIComponent(text)}`;
-        await WebBrowser.openBrowserAsync(dataUrl);
-      } catch {}
+      return;
     }
+    // Native: download to cache dir then share
+    try {
+      const filename = kind === 'pdf'
+        ? `eba-finance-summary-${new Date().toISOString().slice(0, 10)}.pdf`
+        : `eba-finance-${csvKind}-${new Date().toISOString().slice(0, 10)}.csv`;
+      const target = (FileSystem.cacheDirectory || '') + filename;
+      await FileSystem.downloadAsync(url, target, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(target, {
+          mimeType: kind === 'pdf' ? 'application/pdf' : 'text/csv',
+          dialogTitle: 'Export EBA Finance data',
+        });
+      } else {
+        await WebBrowser.openBrowserAsync(target);
+      }
+    } catch {}
   };
 
   return (
@@ -153,6 +167,23 @@ export default function ReportsScreen() {
 
           <View style={styles.exportSection}>
             <Text style={[styles.sectionTitle, { color: c.onSurface }]}>Export</Text>
+
+            <Pressable
+              testID="export-pdf"
+              onPress={() => exportFile('pdf')}
+              style={[styles.exportPdfBtn, { backgroundColor: c.brand }]}
+            >
+              <Ionicons name="document-text" size={18} color={c.onBrand} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: c.onBrand, fontWeight: '700', fontSize: 14 }}>PDF Summary</Text>
+                <Text style={{ color: c.onBrand + 'CC', fontSize: 12, marginTop: 2 }}>
+                  Complete financial statement in one file
+                </Text>
+              </View>
+              <Ionicons name="download-outline" size={18} color={c.onBrand} />
+            </Pressable>
+
+            <Text style={[styles.exportSubLabel, { color: c.onSurfaceSecondary }]}>CSV Files</Text>
             <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
               {[
                 { k: 'all', label: 'All data' },
@@ -163,11 +194,11 @@ export default function ReportsScreen() {
                 <Pressable
                   key={it.k}
                   testID={`export-csv-${it.k}`}
-                  onPress={() => exportCSV(it.k)}
-                  style={[styles.exportBtn, { backgroundColor: c.brand }]}
+                  onPress={() => exportFile('csv', it.k)}
+                  style={[styles.exportBtn, { backgroundColor: c.surfaceSecondary, borderColor: c.border }]}
                 >
-                  <Ionicons name="download-outline" size={16} color={c.onBrand} />
-                  <Text style={{ color: c.onBrand, fontWeight: '600', fontSize: 13 }}>{it.label} CSV</Text>
+                  <Ionicons name="download-outline" size={14} color={c.onSurface} />
+                  <Text style={{ color: c.onSurface, fontWeight: '600', fontSize: 13 }}>{it.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -240,5 +271,7 @@ const styles = StyleSheet.create({
   flowRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
   exportSection: { marginTop: spacing.xl },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderRadius: radius.md },
+  exportPdfBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, marginBottom: spacing.md },
+  exportSubLabel: { fontSize: 12, fontWeight: '600', marginBottom: spacing.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
+  exportBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1 },
 });
