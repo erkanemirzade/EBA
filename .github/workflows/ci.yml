@@ -25,7 +25,21 @@ jobs:
           python -m pip install --upgrade pip
           grep -v -E 'customer-assets.emergentagent.com|@|emergentintegrations' backend/requirements.txt > backend/requirements.ci.txt || true
           echo "Filtered requirements written to backend/requirements.ci.txt"
-          python -m pip install -r backend/requirements.ci.txt
+          set -o pipefail
+          # Retry pip install a few times; capture verbose log for debugging
+          for i in 1 2 3; do
+            echo "Attempt $i: installing requirements..."
+            python -m pip install -r backend/requirements.ci.txt > /tmp/pip-install.log 2>&1 && break || (echo "Attempt $i failed; retrying..."; sleep 5)
+          done
+          if [ ! -s /tmp/pip-install.log ]; then
+            echo "No pip log generated" && exit 1
+          fi
+          tail -n 200 /tmp/pip-install.log || true
+      - name: Upload pip install log
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-install-log
+          path: /tmp/pip-install.log
       - name: Run backend tests (skip security integration tests)
         run: |
           # Some tests target external preview endpoints and may fail in CI.
