@@ -33,17 +33,19 @@ jobs:
           pytest -q backend/tests -k "not security_fixes"
 
   frontend:
-    if: false
     runs-on: ubuntu-latest
+    needs: backend
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node (stable)
-        uses: actions/setup-node@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: '18.x'
+          node-version: '18'
           cache: 'yarn'
-      - name: Diagnostic: show versions
+      - name: Enable Yarn via Corepack
         run: |
+          corepack enable || true
+          corepack prepare yarn@1.22.22 --activate || true
           node --version || true
           npm --version || true
           yarn --version || true
