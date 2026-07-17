@@ -60,17 +60,16 @@ jobs:
     needs: backend
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'yarn'
+      - name: Install Node (NodeSource)
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          node --version || true
+          npm --version || true
       - name: Enable Yarn via Corepack
         run: |
           corepack enable || true
           corepack prepare yarn@1.22.22 --activate || true
-          node --version || true
-          npm --version || true
           yarn --version || true
       - name: Install frontend deps
         run: |
