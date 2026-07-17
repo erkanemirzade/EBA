@@ -43,8 +43,17 @@ jobs:
       - name: Run backend tests (skip security integration tests)
         run: |
           # Some tests target external preview endpoints and may fail in CI.
-          # Skip the security_fixes integration tests that require specific remote behavior.
-          pytest -q backend/tests -k "not security_fixes"
+          pytest -q backend/tests -k "not security_fixes" | tee /tmp/pytest.log || true
+      - name: Upload pytest log
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: /tmp/pytest.log
+      - name: Fail if tests failed
+        run: |
+          if grep -q "FAILED" /tmp/pytest.log || grep -q "ERROR" /tmp/pytest.log; then
+            echo "Tests failed; see pytest log artifact"; exit 1
+          fi
 
   frontend:
     runs-on: ubuntu-latest
